@@ -1,96 +1,153 @@
-# DGX-SPARK-COMFYUI-DOCKER
+# ComfyUI Deployment for NVIDIA DGX Spark
 
-Enterprise-grade Ansible automation for deploying ComfyUI on NVIDIA DGX Spark with Blackwell GB10 GPUs.
+Production-grade Ansible automation for deploying ComfyUI on NVIDIA DGX Spark systems with Blackwell GB10 GPU architecture.
 
 ## Overview
 
-This repository provides comprehensive infrastructure-as-code for ComfyUI deployment on NVIDIA DGX Spark platforms. Optimized for Blackwell GB10 architecture (compute capability 12.1) with PyTorch 2.9.1+cu130, sageattention, and production-hardened service management.
+This repository provides infrastructure-as-code for automated ComfyUI deployment targeting NVIDIA DGX Spark platforms with Blackwell GB10 GPUs (compute capability 12.1). The deployment architecture leverages native installation patterns with systemd service management, delivering optimized performance through PyTorch 2.9.1+cu130, custom-compiled sageattention with sm_121a kernel support, and production-hardened configuration management.
 
-**Key Features:**
-- Native installation with systemd service management
-- Multi-user access control via group permissions
-- NFS integration for shared model storage
-- Parallel async custom node installation (6x faster)
-- 20 optimized CUDA/PyTorch environment variables
-- Idempotent playbooks for safe updates
-- Sageattention required and compiled for sm_121
+## Deployment Options
+
+### Native Installation (Production Ready)
+
+The native deployment path provides complete lifecycle management for ComfyUI on bare-metal DGX Spark systems. This is the recommended approach for production workloads requiring maximum performance and stability.
+
+**Status:** Production ready and validated
+
+**Documentation:** [Native Deployment Guide](ansible/playbooks/native/README.md)
+
+**Features:**
+- Systemd service management with automatic restart policies
+- Multi-user access control via group-based permissions
+- NFS integration for shared model repositories
+- Parallel asynchronous custom node installation
+- Custom-built sageattention with Blackwell sm_121a support
+- Custom-built Triton with sm_121a PTX compiler support
+- Comprehensive CUDA optimization settings
+- Idempotent playbooks enabling safe re-execution
+
+### Docker Deployment (Development)
+
+Containerized deployment using NVIDIA NGC PyTorch base images.
+
+**Status:** Development in progress, not production ready
+
+**Location:** `docker/` directory
+
+**Note:** The Docker deployment path is currently incomplete and should not be used for production workloads. Native deployment is the supported production path
 
 ## Quick Start
 
+For complete installation instructions, configuration reference, and troubleshooting guidance, refer to the [Native Deployment Guide](ansible/playbooks/native/README.md).
+
 ### Prerequisites
-- NVIDIA DGX Spark with Blackwell GB10 GPU
-- Ubuntu 24.04 LTS with CUDA 13.0
-- Ansible 2.9+ on control machine
-- SSH access with sudo privileges
 
-### Configuration
+- NVIDIA DGX Spark with Blackwell GB10 GPU (compute capability 12.1)
+- Ubuntu 24.04 LTS with CUDA 13.0 drivers and toolkit
+- Ansible 2.9 or later on control machine
+- SSH access with sudo privileges to target system
 
-1. **Edit configuration:** `ansible/inventory/group_vars/all.yml`
-2. **Set inventory:** `ansible/inventory/hosts.ini`
-
-### Deployment
+### Basic Deployment Sequence
 
 ```bash
 cd ansible/playbooks/native
 
-# 1. Install ComfyUI with PyTorch cu130 and sageattention
+# Step 1: Install ComfyUI with PyTorch cu130, sageattention, and Triton
 ansible-playbook -i ../../inventory/hosts.ini 01_install_update_comfyui.yml
 
-# 2. Configure NFS symlinks (if using shared storage)
+# Step 2: Configure NFS symlinks (optional, skip if using local storage)
 ansible-playbook -i ../../inventory/hosts.ini 02_symlink_models_input_output.yml
 
-# 3. Install custom nodes (34 repos, parallel cloning)
+# Step 3: Install custom node extensions
 ansible-playbook -i ../../inventory/hosts.ini 03_install_recommended_plugins.yml
 
-# 4. Deploy as systemd service
+# Step 4: Deploy as systemd service
 ansible-playbook -i ../../inventory/hosts.ini 04_run_as_service.yml
+
+# Step 5: Install sageattention with Blackwell support
+ansible-playbook -i ../../inventory/hosts.ini 09_install_sageattention_blackwell.yml
 ```
 
-**Access:** `http://<dgx_spark_ip>:8188`
+**Access ComfyUI:** `http://<dgx_spark_ip>:8188`
 
 ## Documentation
 
-Complete documentation available in:
-- **[Native Deployment Guide](ansible/playbooks/native/README.md)** - Full playbook reference, configuration, troubleshooting
+- **[Native Deployment Guide](ansible/playbooks/native/README.md)** - Complete installation procedures, configuration reference, playbook details, and troubleshooting
+- **[SageAttention Blackwell Installation](ansible/playbooks/native/09_install_sageattention_blackwell.md)** - Custom Triton and sageattention build procedures for sm_121a architecture
 
 ## Repository Structure
 
 ```
 ansible/
 ├── inventory/
-│   ├── hosts.ini                    # Target host configuration
+│   ├── hosts.ini                               # Target host definitions
 │   └── group_vars/
-│       └── all.yml                  # Centralized configuration (env vars, flags, custom nodes)
+│       └── all.yml                             # Centralized configuration variables
 └── playbooks/
     └── native/
-        ├── 01_install_update_comfyui.yml      # Core installation (idempotent)
-        ├── 02_symlink_models_input_output.yml # NFS integration
-        ├── 03_install_recommended_plugins.yml # Custom nodes (parallel async)
-        ├── 04_run_as_service.yml              # Systemd service deployment
-        ├── 05_restart_service.yml             # Service restart
-        ├── 06_pause_service.yml               # Disable service
-        ├── 07_start_service.yml               # Enable/start service
-        ├── 08_stop_remove_service.yml         # Complete removal
-        ├── 99_nuke_comfy.yml                  # Clean rebuild testing
-        └── README.md                          # Complete documentation
+        ├── 01_install_update_comfyui.yml       # Core installation (idempotent)
+        ├── 02_symlink_models_input_output.yml  # NFS storage integration
+        ├── 03_install_recommended_plugins.yml  # Custom node deployment
+        ├── 04_run_as_service.yml               # Systemd service creation
+        ├── 05_restart_service.yml              # Service restart utility
+        ├── 06_pause_service.yml                # Service pause utility
+        ├── 07_start_service.yml                # Service start utility
+        ├── 08_stop_remove_service.yml          # Service removal
+        ├── 09_install_sageattention_blackwell.yml  # Blackwell-specific optimization
+        ├── 99_nuke_comfy.yml                   # Clean removal for testing
+        └── README.md                           # Comprehensive documentation
+
+docker/
+├── Dockerfile.comfyui-dgx                      # Base Dockerfile (incomplete)
+└── entrypoint.sh                               # Container entrypoint (incomplete)
 ```
 
-## Key Optimizations
+## Configuration Management
 
-- **Sageattention Required:** Compiled for sm_121, mandatory for WAN workflows
-- **Parallel Custom Nodes:** 5 minutes vs 30+ minutes (6x speedup)
-- **Environment Variables:** 20 optimized CUDA/PyTorch settings for all operations
-- **Idempotent Updates:** Safe to run 01 playbook repeatedly without wiping installation
-- **Optimized Flags:** Removed unnecessary flags (--cache-classic, --force-non-blocking, --disable-cuda-malloc)
+Primary configuration is managed through `ansible/inventory/group_vars/all.yml`. This file controls:
 
-## Production Status
+- Installation paths and Python environment settings
+- Multi-user access control parameters
+- CUDA architecture and PyTorch version specifications
+- ComfyUI service configuration (flags, environment variables)
+- NFS mount point definitions
+- Custom node repository list
 
-Validated for production workloads:
-- ✅ Continuous 10+ hour operation
-- ✅ High-resolution image generation
-- ✅ Face swap processing (ReActor)
-- ✅ No OOM errors or service interruptions
-- ✅ 2-3x throughput vs containerized deployment
+Refer to the [Native Deployment Guide](ansible/playbooks/native/README.md) for detailed configuration parameters.
+
+## Technical Highlights
+
+### Blackwell GB10 Optimization
+
+The deployment architecture includes specialized support for NVIDIA Blackwell GB10 architecture:
+
+- **Custom SageAttention Build:** Compiled from PR 297 with native sm_121a CUDA kernel support
+- **Custom Triton Build:** Built from main branch with sm_121a PTX compiler support (addresses official Triton 3.5.1 limitations)
+- **CUDA Cache Optimization:** Enabled 4GB kernel cache for improved repeated execution performance
+- **Managed Memory Allocation:** Configured for optimal Blackwell memory management patterns
+- **BF16 Precision:** Native bfloat16 support leveraging Blackwell tensor core capabilities
+
+### Performance Characteristics
+
+Validated for production workloads with the following performance profile:
+
+- Continuous operation exceeding 10 hours without service interruption
+- High-resolution image generation without out-of-memory conditions
+- Complex workflow execution including face swap processing (ReActor nodes)
+- 2-3x throughput improvement compared to containerized deployment alternatives
+- Parallel custom node installation reducing setup time from 30+ minutes to approximately 5 minutes
+
+### Environment Configuration
+
+The deployment configures 20 CUDA and PyTorch environment variables optimized for Blackwell architecture, including:
+
+- CUDA cache management and allocation strategies
+- Device visibility and connection limits
+- Module loading and launch blocking behavior
+- Workspace configuration for deterministic operations
+- Telemetry and diagnostic settings
+
+Complete environment variable documentation is available in the [Native Deployment Guide](ansible/playbooks/native/README.md).
 
 ## License
 
