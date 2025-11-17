@@ -1,35 +1,42 @@
 ---
-- name: Symlink ComfyUI models, input, and output directories
+- name: Symlink ComfyUI models, input, output, and temp directories
   hosts: spark_primary
   become: yes
 
   tasks:
-    - name: Check if NFS models mount exists
+    - name: Check if storage models directory exists
       stat:
         path: "{{ nfs_models_path }}"
       register: nfs_models_stat
       when: nfs_models_path != ""
 
-    - name: Check if NFS input mount exists
+    - name: Check if storage input directory exists
       stat:
         path: "{{ nfs_input_path }}"
       register: nfs_input_stat
       when: nfs_input_path != ""
 
-    - name: Check if NFS output mount exists
+    - name: Check if storage output directory exists
       stat:
         path: "{{ nfs_output_path }}"
       register: nfs_output_stat
       when: nfs_output_path != ""
 
-    - name: Fail if NFS mounts are not available
+    - name: Check if storage temp directory exists
+      stat:
+        path: "{{ nfs_temp_path }}"
+      register: nfs_temp_stat
+      when: nfs_temp_path != ""
+
+    - name: Fail if storage directories are not available
       fail:
-        msg: "NFS mount {{ item.path }} does not exist or is not accessible"
+        msg: "Storage directory {{ item.path }} does not exist or is not accessible"
       when: item.path != "" and not item.stat.stat.exists
       loop:
         - { path: "{{ nfs_models_path }}", stat: "{{ nfs_models_stat }}" }
         - { path: "{{ nfs_input_path }}", stat: "{{ nfs_input_stat }}" }
         - { path: "{{ nfs_output_path }}", stat: "{{ nfs_output_stat }}" }
+        - { path: "{{ nfs_temp_path }}", stat: "{{ nfs_temp_stat }}" }
 
     - name: Check if models directory exists and is not a symlink
       stat:
@@ -45,6 +52,11 @@
       stat:
         path: "{{ comfyui_app_dir }}/output"
       register: output_check
+
+    - name: Check if temp directory exists and is not a symlink
+      stat:
+        path: "{{ comfyui_app_dir }}/temp"
+      register: temp_check
 
     - name: Remove existing models directory if it exists and is not a symlink
       file:
@@ -63,6 +75,12 @@
         path: "{{ comfyui_app_dir }}/output"
         state: absent
       when: output_check.stat.exists and not output_check.stat.islnk
+
+    - name: Remove existing temp directory if it exists and is not a symlink
+      file:
+        path: "{{ comfyui_app_dir }}/temp"
+        state: absent
+      when: temp_check.stat.exists and not temp_check.stat.islnk
 
     - name: Create symlink for models directory
       file:
@@ -94,6 +112,16 @@
         group: "{{ comfyui_group }}"
       when: nfs_output_path != ""
 
+    - name: Create symlink for temp directory
+      file:
+        src: "{{ nfs_temp_path }}"
+        dest: "{{ comfyui_app_dir }}/temp"
+        state: link
+        force: yes
+        owner: root
+        group: "{{ comfyui_group }}"
+      when: nfs_temp_path != ""
+
     - name: Verify symlinks are created correctly
       stat:
         path: "{{ item }}"
@@ -102,6 +130,7 @@
         - "{{ comfyui_app_dir }}/models"
         - "{{ comfyui_app_dir }}/input"
         - "{{ comfyui_app_dir }}/output"
+        - "{{ comfyui_app_dir }}/temp"
 
     - name: Display symlink summary
       debug:
@@ -112,6 +141,7 @@
           Models:  {{ comfyui_app_dir }}/models -> {{ nfs_models_path }}
           Input:   {{ comfyui_app_dir }}/input -> {{ nfs_input_path }}
           Output:  {{ comfyui_app_dir }}/output -> {{ nfs_output_path }}
+          Temp:    {{ comfyui_app_dir }}/temp -> {{ nfs_temp_path }}
           
-          All directories now point to NFS shared storage.
+          All directories now point to local ZFS storage.
           Original directories have been removed and replaced with symlinks.

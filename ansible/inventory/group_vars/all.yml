@@ -34,18 +34,23 @@ comfyui_flags:
   - "--disable-xformers"
   - "--use-sage-attention"
   - "--gpu-only"
+  - "--cache-none"
+  - "--fp16-unet"
+  - "--fp16-vae"
+  - "--fp16-text-enc"
+  - "--force-fp16"
+  - "--dont-upcast-attention"
+  - "--disable-mmap"
+  - "--disable-cuda-malloc"
+  - "--async-offload"
+  - "--disable-pinned-memory"
 
 # Environment variables for ComfyUI runtime and build
 comfyui_env_vars:
   TOKENIZERS_PARALLELISM: "false"
-  CUDA_MANAGED_FORCE_DEVICE_ALLOC: "1"
-  CUDA_CACHE_DISABLE: "0"
   CUDA_CACHE_MAXSIZE: "4294967296"
-  CUDA_AUTO_BOOST: "1"
-  CUDA_AUTO_BOOST_DEFAULT: "1"
-  CUDA_DEVICE_MAX_COPY_CONNECTIONS: "32"
-  CUDA_DEVICE_MAX_CONNECTIONS: "32"
-  CUDA_LAUNCH_BLOCKING: "0"
+  CUDA_DEVICE_MAX_COPY_CONNECTIONS: "1"
+  CUDA_DEVICE_MAX_CONNECTIONS: "1"
   CUDA_MODULE_LOADING: "EAGER"
   HF_HUB_DISABLE_TELEMETRY: "1"
   TORCHDYNAMO_DISABLE: "1"
@@ -55,11 +60,13 @@ comfyui_env_vars:
   PYTHONDONTWRITEBYTECODE: "1"
   PYTHONWARNINGS: "ignore"
   CUBLAS_WORKSPACE_CONFIG: ":0:0"
+  TORCH_USE_CUDA_DSA: "1"
 
-# NFS mount paths (set to empty strings if not using NFS)
-nfs_models_path: "/mnt/comfy_model_share/comfy/models"
-nfs_input_path: "/mnt/comfy_temp_share/ComfyUI/input"
-nfs_output_path: "/mnt/comfy_temp_share/ComfyUI/output"
+# Local ZFS storage paths (previously NFS mounts)
+nfs_models_path: "/mnt/data_a/comfy/models"
+nfs_input_path: "/mnt/data_a/comfy/input"
+nfs_output_path: "/mnt/data_a/comfy/output"
+nfs_temp_path: "/mnt/data_a/comfy/temp"
 
 # Package versions (optional - leave empty for latest)
 onnxruntime_version: ""

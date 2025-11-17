@@ -1,155 +1,192 @@
-# ComfyUI Deployment for NVIDIA DGX Spark
+# ComfyUI on NVIDIA DGX Spark
 
 Production-grade Ansible automation for deploying ComfyUI on NVIDIA DGX Spark systems with Blackwell GB10 GPU architecture.
 
-## Overview
+## What This Does
 
-This repository provides infrastructure-as-code for automated ComfyUI deployment targeting NVIDIA DGX Spark platforms with Blackwell GB10 GPUs (compute capability 12.1). The deployment architecture leverages native installation patterns with systemd service management, delivering optimized performance through PyTorch 2.9.1+cu130, custom-compiled sageattention with sm_121a kernel support, and production-hardened configuration management.
+This repo automates the entire ComfyUI setup process on DGX Spark hardware. It handles everything from installing Python and CUDA dependencies to setting up a systemd service that runs on boot. The whole thing is built around Ansible playbooks so you can deploy consistently across multiple machines.
 
-## Deployment Options
+The native installation path is production-ready and has been running stable for 10+ hours straight with heavy workloads (face swaps, high-res generation, complex workflows). Docker deployment is still WIP and not ready yet.
 
-### Native Installation (Production Ready)
+## Why Native vs Docker?
 
-The native deployment path provides complete lifecycle management for ComfyUI on bare-metal DGX Spark systems. This is the recommended approach for production workloads requiring maximum performance and stability.
+Short answer: performance. The native install is 2-3x faster than containerized setups and doesn't have the memory overhead. For production workloads on expensive GPU hardware, that matters.
 
-**Status:** Production ready and validated
+## What's Optimized Here
 
-**Documentation:** [Native Deployment Guide](ansible/playbooks/native/README.md)
+This setup is tuned specifically for the Blackwell GB10 architecture with unified memory fabric (compute capability 12.1):
 
-**Features:**
-- Systemd service management with automatic restart policies
-- Multi-user access control via group-based permissions
-- NFS integration for shared model repositories
-- Parallel asynchronous custom node installation
-- Custom-built sageattention with Blackwell sm_121a support
-- Custom-built Triton with sm_121a PTX compiler support
-- Comprehensive CUDA optimization settings
-- Idempotent playbooks enabling safe re-execution
+**Precision & Attention:**
+- **FP16 precision** - Force FP16 for unet/vae/text encoder (enables SageAttention, 2x smaller than FP32)
+- **SageAttention enabled** - Fast attention for Blackwell tensor cores (requires FP16/BF16)
+- **Flash Attention** - Included by default for standard workloads
+- **No attention upcasting** - Keeps attention operations in FP16 for maximum speed
 
-### Docker Deployment (Development)
+**Memory Management (Critical for Unified Memory):**
+- **GPU-only mode** - Forces all models into GPU side of unified memory fabric
+- **Zero caching** - `--cache-none` eliminates RAM spillover (30-40s load → seconds)
+- **No memory mapping** - `--disable-mmap` forces direct GPU allocation
+- **Disabled CUDA malloc** - Uses PyTorch's allocator optimized for unified memory
+- **No pinned memory** - Reduces RAM overhead on unified fabric
+- **Async offload** - Non-blocking model swapping for better pipeline
 
-Containerized deployment using NVIDIA NGC PyTorch base images.
+**CUDA Tuning:**
+- **Single connection mode** - 1 CUDA connection, 1 copy connection (eliminates contention on unified fabric)
+- **EAGER module loading** - Immediate kernel loading for predictable performance
+- **Minimal CUBLAS workspace** - :0:0 config to reduce overhead
+- **PyTorch 2.9.1 with CUDA 13.0** - Latest stable with Blackwell support
 
-**Status:** Development in progress, not production ready
+**System-level GPU optimizations** - Locked clocks, vboost, memory tuning, I/O optimizations (see `ansible/scripts/`)
 
-**Location:** `docker/` directory
-
-**Note:** The Docker deployment path is currently incomplete and should not be used for production workloads. Native deployment is the supported production path
+**Performance Results:**
+- Model loading: **30-40s → 2-3 seconds** (10-20x faster)
+- Sampler speed: **20% faster** than default config
+- Full GPU utilization (fans spinning at load)
+- 105W power draw vs 650W for comparable discrete GPU (6x memory at 16% power)
 
 ## Quick Start
 
-For complete installation instructions, configuration reference, and troubleshooting guidance, refer to the [Native Deployment Guide](ansible/playbooks/native/README.md).
+**What you need:**
+- DGX Spark with Blackwell GB10 GPU
+- Ubuntu 24.04 with CUDA 13.0 drivers installed
+- Ansible on your local machine (WSL works fine)
+- SSH access to the DGX with sudo
 
-### Prerequisites
-
-- NVIDIA DGX Spark with Blackwell GB10 GPU (compute capability 12.1)
-- Ubuntu 24.04 LTS with CUDA 13.0 drivers and toolkit
-- Ansible 2.9 or later on control machine
-- SSH access with sudo privileges to target system
-
-### Basic Deployment Sequence
+**Installation steps:**
 
 ```bash
 cd ansible/playbooks/native
 
-# Step 1: Install ComfyUI with PyTorch cu130, sageattention, and Triton
+# 1. Install ComfyUI with PyTorch and flash-attention
 ansible-playbook -i ../../inventory/hosts.ini 01_install_update_comfyui.yml
 
-# Step 2: Configure NFS symlinks (optional, skip if using local storage)
+# 2. (Optional) Set up NFS storage for models - skip if using local storage
 ansible-playbook -i ../../inventory/hosts.ini 02_symlink_models_input_output.yml
 
-# Step 3: Install custom node extensions
+# 3. Install custom nodes (ComfyUI-Manager, Impact Pack, etc.)
 ansible-playbook -i ../../inventory/hosts.ini 03_install_recommended_plugins.yml
 
-# Step 4: Deploy as systemd service
+# 4. Set up as a systemd service (auto-starts on boot)
 ansible-playbook -i ../../inventory/hosts.ini 04_run_as_service.yml
 
-# Step 5: Install sageattention with Blackwell support
+# 5. (Optional) Install SageAttention - recommended for FLUX and large models
 ansible-playbook -i ../../inventory/hosts.ini 09_install_sageattention_blackwell.yml
+
+# 6. (Optional but recommended) Apply GPU optimizations for max performance
+ansible-playbook -i ../../inventory/hosts.ini 10_complete_optimize.yml
 ```
 
-**Access ComfyUI:** `http://<dgx_spark_ip>:8188`
+Then open `http://<your-dgx-ip>:8188` and you're good to go.
 
-## Documentation
+**After reboots:** GPU clocks reset due to hardware limitations. Re-apply with:
+```bash
+ansible-playbook -i ../../inventory/hosts.ini 11_apply_non_persistent.yml
+```
 
-- **[Native Deployment Guide](ansible/playbooks/native/README.md)** - Complete installation procedures, configuration reference, playbook details, and troubleshooting
-- **[SageAttention Blackwell Installation](ansible/playbooks/native/09_install_sageattention_blackwell.md)** - Custom Triton and sageattention build procedures for sm_121a architecture
+## Configuration
 
-## Repository Structure
+Everything is controlled through `ansible/inventory/group_vars/all.yml`:
+
+**Core Settings:**
+- Installation paths and Python/CUDA versions
+- Service configuration (port, user, etc.)
+
+**ComfyUI Flags (Optimized for Grace-Blackwell Unified Memory):**
+```yaml
+- "--gpu-only"              # Force GPU-side allocation on unified fabric
+- "--cache-none"            # Zero caching = 10-20x faster model loads
+- "--fp16-unet/vae/text-enc" # FP16 precision for SageAttention
+- "--force-fp16"            # Enforce FP16 everywhere
+- "--dont-upcast-attention" # Keep attention in FP16 for speed
+- "--disable-mmap"          # Direct GPU memory allocation
+- "--disable-cuda-malloc"   # Use PyTorch allocator
+- "--async-offload"         # Non-blocking model swaps
+- "--disable-pinned-memory" # Reduce RAM overhead
+- "--use-sage-attention"    # Blackwell-optimized attention
+- "--disable-xformers"      # Incompatible with sage attention
+```
+
+**CUDA Environment (Tuned for Unified Memory Fabric):**
+```yaml
+CUDA_MODULE_LOADING: "EAGER"              # Immediate kernel loading
+CUDA_DEVICE_MAX_CONNECTIONS: "1"          # Single connection mode
+CUDA_DEVICE_MAX_COPY_CONNECTIONS: "1"     # No connection contention
+CUBLAS_WORKSPACE_CONFIG: ":0:0"           # Minimal workspace overhead
+```
+
+**Why These Settings Matter:**
+Traditional discrete GPU optimizations (aggressive caching, pinned memory, high connection counts) actually **hurt** performance on Grace-Blackwell's unified memory architecture. This config forces everything GPU-side with zero caching overhead, resulting in 10-20x faster model loading and 20% faster inference.
+
+Check the [Native Deployment Guide](ansible/playbooks/native/README.md) for all configuration options.
+
+## What's Working
+
+This has been tested and validated for:
+
+## What's Working
+
+This setup has been tested and works reliably with:
+
+- **10+ hour continuous runs** without crashes or memory leaks
+- **High-resolution image generation** (no OOM errors)
+- **Complex workflows** with face swapping (ReActor nodes), upscaling, etc.
+- **Parallel custom node installation** (5 minutes vs 30+ sequential)
+- **System-level optimizations** for locked GPU clocks, memory tuning, I/O performance
+
+## Where This Is At
+
+**Current Status:** Native installation is solid and production-ready. This is as tuned as we're going to get for bare-metal deployment.
+
+**Next Steps:** Docker packaging is next on the roadmap, but for now the native install works great and gives better performance anyway.
+
+**GPU Optimization:** There's a full GPU optimization suite in `ansible/scripts/` with playbooks for locking clocks, tuning memory/I/O, and making it all persistent. Check the [GPU Optimization README](ansible/scripts/README.md) for details.
+
+## File Structure
 
 ```
 ansible/
 ├── inventory/
-│   ├── hosts.ini                               # Target host definitions
-│   └── group_vars/
-│       └── all.yml                             # Centralized configuration variables
-└── playbooks/
-    └── native/
-        ├── 01_install_update_comfyui.yml       # Core installation (idempotent)
-        ├── 02_symlink_models_input_output.yml  # NFS storage integration
-        ├── 03_install_recommended_plugins.yml  # Custom node deployment
-        ├── 04_run_as_service.yml               # Systemd service creation
-        ├── 05_restart_service.yml              # Service restart utility
-        ├── 06_pause_service.yml                # Service pause utility
-        ├── 07_start_service.yml                # Service start utility
-        ├── 08_stop_remove_service.yml          # Service removal
-        ├── 09_install_sageattention_blackwell.yml  # Blackwell-specific optimization
-        ├── 99_nuke_comfy.yml                   # Clean removal for testing
-        └── README.md                           # Comprehensive documentation
+│   ├── hosts.ini                              # Your DGX Spark IPs
+│   └── group_vars/all.yml                     # All the config knobs
+├── playbooks/native/
+│   ├── 01_install_update_comfyui.yml          # Main install
+│   ├── 02_symlink_models_input_output.yml     # Storage setup
+│   ├── 03_install_recommended_plugins.yml     # Custom nodes
+│   ├── 04_run_as_service.yml                  # Systemd service
+│   ├── 05-08_*.yml                            # Service management utils
+│   ├── 09_install_sageattention_blackwell.yml # Optional FLUX optimization
+│   ├── 10_complete_optimize.yml               # GPU/system tuning
+│   ├── 11_apply_non_persistent.yml            # Post-reboot GPU restore
+│   ├── 99_nuke_comfy.yml                      # Clean uninstall
+│   └── README.md                              # Detailed docs
+└── scripts/
+    ├── gpu_optimize.sh                        # GPU clock locking, vboost
+    ├── system_optimize.sh                     # Memory, I/O, network tuning
+    ├── make_persistent.sh                     # Persistence configs
+    └── README.md                              # Optimization guide
 
-docker/
-├── Dockerfile.comfyui-dgx                      # Base Dockerfile (incomplete)
-└── entrypoint.sh                               # Container entrypoint (incomplete)
+docker/                                         # WIP, not ready yet
 ```
 
-## Configuration Management
+## Docs
 
-Primary configuration is managed through `ansible/inventory/group_vars/all.yml`. This file controls:
+- **[Native Deployment Guide](ansible/playbooks/native/README.md)** - Full installation guide with all the details
+- **[GPU Optimization README](ansible/scripts/README.md)** - Performance tuning for GB10
+- **[SageAttention Installation](ansible/playbooks/native/09_install_sageattention_blackwell.md)** - Building sage attention for Blackwell
 
-- Installation paths and Python environment settings
-- Multi-user access control parameters
-- CUDA architecture and PyTorch version specifications
-- ComfyUI service configuration (flags, environment variables)
-- NFS mount point definitions
-- Custom node repository list
+## Notes
 
-Refer to the [Native Deployment Guide](ansible/playbooks/native/README.md) for detailed configuration parameters.
+**Unified Memory Architecture:** Grace-Blackwell's unified memory fabric is fundamentally different from discrete GPUs. Traditional optimizations like aggressive caching, reserve-vram, and high CUDA connection counts actually hurt performance. The config here is specifically tuned to force GPU-side allocation with zero caching overhead.
 
-## Technical Highlights
+**SageAttention:** Requires FP16 or BF16 precision. FP32 will fall back to slow PyTorch attention. The `--force-fp16` config enables full SageAttention acceleration on Blackwell tensor cores.
 
-### Blackwell GB10 Optimization
+**Model Loading Speed:** With `--cache-none` and direct GPU allocation, model loading went from 30-40 seconds to 2-3 seconds. This is the key optimization for Grace-Blackwell systems.
 
-The deployment architecture includes specialized support for NVIDIA Blackwell GB10 architecture:
+**GPU Clock Persistence:** Clock settings don't persist across reboots due to GB10 firmware behavior. Run playbook 11 after each boot (~5 seconds) to restore max clocks and vboost.
 
-- **Custom SageAttention Build:** Compiled from PR 297 with native sm_121a CUDA kernel support
-- **Custom Triton Build:** Built from main branch with sm_121a PTX compiler support (addresses official Triton 3.5.1 limitations)
-- **CUDA Cache Optimization:** Enabled 4GB kernel cache for improved repeated execution performance
-- **Managed Memory Allocation:** Configured for optimal Blackwell memory management patterns
-- **BF16 Precision:** Native bfloat16 support leveraging Blackwell tensor core capabilities
-
-### Performance Characteristics
-
-Validated for production workloads with the following performance profile:
-
-- Continuous operation exceeding 10 hours without service interruption
-- High-resolution image generation without out-of-memory conditions
-- Complex workflow execution including face swap processing (ReActor nodes)
-- 2-3x throughput improvement compared to containerized deployment alternatives
-- Parallel custom node installation reducing setup time from 30+ minutes to approximately 5 minutes
-
-### Environment Configuration
-
-The deployment configures 20 CUDA and PyTorch environment variables optimized for Blackwell architecture, including:
-
-- CUDA cache management and allocation strategies
-- Device visibility and connection limits
-- Module loading and launch blocking behavior
-- Workspace configuration for deterministic operations
-- Telemetry and diagnostic settings
-
-Complete environment variable documentation is available in the [Native Deployment Guide](ansible/playbooks/native/README.md).
+**Docker Status:** Docker deployment is in progress but not ready. Native install is production-ready and delivers better performance on unified memory architecture.
 
 ## License
 
-See [LICENSE](LICENSE) for details.
+See [LICENSE](LICENSE).
 

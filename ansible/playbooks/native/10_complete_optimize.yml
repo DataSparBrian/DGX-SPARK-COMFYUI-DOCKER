@@ -1,0 +1,270 @@
+---
+- name: Complete System Performance Optimization with Persistence and Reboot Verification
+  hosts: all
+  become: yes
+  gather_facts: no
+  
+  vars:
+    optimization_action: "apply"  # Can be: apply, undo, status
+    do_reboot: false              # Set to true to test persistence with reboot
+    reboot_timeout: 600           # Wait up to 10 minutes for reboot
+  
+  tasks:
+    # ========================================
+    # Phase 1: Apply Optimizations
+    # ========================================
+    
+    - name: Copy GPU optimization script to target
+      copy:
+        src: ../../scripts/gpu_optimize.sh
+        dest: /tmp/gpu_optimize.sh
+        mode: '0755'
+      when: optimization_action != "status"
+    
+    - name: Copy system optimization script to target
+      copy:
+        src: ../../scripts/system_optimize.sh
+        dest: /tmp/system_optimize.sh
+        mode: '0755'
+      when: optimization_action != "status"
+    
+    - name: Copy persistence configuration script to target
+      copy:
+        src: ../../scripts/make_persistent.sh
+        dest: /tmp/make_persistent.sh
+        mode: '0755'
+      when: optimization_action == "apply"
+    
+    - name: Execute GPU and CPU optimizations
+      command: /tmp/gpu_optimize.sh {{ optimization_action }}
+      register: gpu_result
+      changed_when: "'✓' in gpu_result.stdout"
+      when: optimization_action != "status"
+    
+    - name: Display GPU optimization results
+      debug:
+        msg: "{{ gpu_result.stdout_lines }}"
+      when: optimization_action != "status" and gpu_result is defined
+    
+    - name: Execute system-level optimizations
+      command: /tmp/system_optimize.sh {{ optimization_action }}
+      register: system_result
+      changed_when: "'✓' in system_result.stdout"
+      when: optimization_action != "status"
+    
+    - name: Display system optimization results
+      debug:
+        msg: "{{ system_result.stdout_lines }}"
+      when: optimization_action != "status" and system_result is defined
+    
+    # ========================================
+    # Phase 2: Make Persistent
+    # ========================================
+    
+    - name: Create permanent optimization scripts directory
+      file:
+        path: /opt/dgx-optimize
+        state: directory
+        mode: '0755'
+      when: optimization_action == "apply"
+    
+    - name: Install GPU optimization script permanently
+      copy:
+        src: ../../scripts/gpu_optimize.sh
+        dest: /opt/dgx-optimize/gpu_optimize.sh
+        mode: '0755'
+      when: optimization_action == "apply"
+    
+    - name: Install persistence configurations
+      command: /tmp/make_persistent.sh install
+      register: persistence_result
+      changed_when: "'✓' in persistence_result.stdout"
+      when: optimization_action == "apply"
+    
+    - name: Display persistence configuration results
+      debug:
+        msg: "{{ persistence_result.stdout_lines }}"
+      when: optimization_action == "apply" and persistence_result is defined
+    
+    # ========================================
+    # Phase 3: Reboot and Verify (Optional)
+    # ========================================
+    
+    - name: Announce reboot
+      debug:
+        msg:
+          - "=========================================="
+          - "REBOOTING SYSTEM NOW"
+          - "=========================================="
+      when: optimization_action == "apply" and do_reboot | bool
+    
+    - name: Reboot the system
+      reboot:
+        reboot_timeout: "{{ reboot_timeout }}"
+        msg: "Rebooting to verify optimization persistence"
+        pre_reboot_delay: 0
+        post_reboot_delay: 10
+      when: optimization_action == "apply" and do_reboot | bool
+    
+    - name: Wait for system to be fully operational
+      wait_for_connection:
+        delay: 5
+        timeout: 300
+      when: optimization_action == "apply" and do_reboot | bool
+    
+    - name: Verify GPU optimizations after reboot
+      command: /opt/dgx-optimize/gpu_optimize.sh status
+      register: gpu_verify
+      changed_when: false
+      when: optimization_action == "apply" and do_reboot | bool
+    
+    - name: Display post-reboot GPU status
+      debug:
+        msg: "{{ gpu_verify.stdout_lines }}"
+      when: optimization_action == "apply" and do_reboot | bool and gpu_verify is defined
+    
+    - name: Copy system optimize script for post-reboot verification
+      copy:
+        src: ../../scripts/system_optimize.sh
+        dest: /tmp/system_optimize_verify.sh
+        mode: '0755'
+      when: optimization_action == "apply" and do_reboot | bool
+    
+    - name: Verify system optimizations after reboot
+      command: /tmp/system_optimize_verify.sh status
+      register: system_verify
+      changed_when: false
+      when: optimization_action == "apply" and do_reboot | bool
+    
+    - name: Display post-reboot system status
+      debug:
+        msg: "{{ system_verify.stdout_lines }}"
+      when: optimization_action == "apply" and do_reboot | bool and system_verify is defined
+    
+    - name: Verify systemd service is running
+      systemd:
+        name: dgx-optimize.service
+        state: started
+      register: service_status
+      when: optimization_action == "apply" and do_reboot | bool
+    
+    - name: Display systemd service status
+      debug:
+        msg: "✓ dgx-optimize.service is active and loaded"
+      when: optimization_action == "apply" and do_reboot | bool and service_status is succeeded
+    
+    # ========================================
+    # Phase 4: Status Check (if requested)
+    # ========================================
+    
+    - name: Check GPU optimization status
+      shell: |
+        if [ -f /opt/dgx-optimize/gpu_optimize.sh ]; then
+          /opt/dgx-optimize/gpu_optimize.sh status
+        else
+          echo "GPU optimize script not installed"
+        fi
+      register: status_gpu
+      changed_when: false
+      when: optimization_action == "status"
+    
+    - name: Check system optimization status
+      copy:
+        src: ../../scripts/system_optimize.sh
+        dest: /tmp/system_optimize_status.sh
+        mode: '0755'
+      when: optimization_action == "status"
+    
+    - name: Execute system status check
+      command: /tmp/system_optimize_status.sh status
+      register: status_system
+      changed_when: false
+      when: optimization_action == "status"
+    
+    - name: Check persistence configuration status
+      copy:
+        src: ../../scripts/make_persistent.sh
+        dest: /tmp/make_persistent_status.sh
+        mode: '0755'
+      when: optimization_action == "status"
+    
+    - name: Execute persistence status check
+      command: /tmp/make_persistent_status.sh status
+      register: status_persistence
+      changed_when: false
+      when: optimization_action == "status"
+    
+    - name: Display complete status
+      debug:
+        msg:
+          - "=========================================="
+          - "COMPLETE SYSTEM OPTIMIZATION STATUS"
+          - "=========================================="
+          - ""
+          - "{{ status_gpu.stdout_lines if status_gpu is defined else [] }}"
+          - ""
+          - "{{ status_system.stdout_lines if status_system is defined else [] }}"
+          - ""
+          - "{{ status_persistence.stdout_lines if status_persistence is defined else [] }}"
+      when: optimization_action == "status"
+    
+    # ========================================
+    # Cleanup
+    # ========================================
+    
+    - name: Clean up temporary scripts
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/gpu_optimize.sh
+        - /tmp/system_optimize.sh
+        - /tmp/make_persistent.sh
+        - /tmp/system_optimize_verify.sh
+        - /tmp/system_optimize_status.sh
+        - /tmp/make_persistent_status.sh
+      when: optimization_action != "status" or (optimization_action == "status" and status_persistence is defined)
+    
+    # ========================================
+    # Final Summary
+    # ========================================
+    
+    - name: Display final summary
+      debug:
+        msg:
+          - "============================================"
+          - "Complete System Optimization - FINISHED"
+          - "============================================"
+          - ""
+          - "Completed tasks:"
+          - "  ✓ GPU/CPU optimizations applied"
+          - "  ✓ System-level optimizations applied"
+          - "  ✓ Persistence configurations installed"
+          - "  ✓ Systemd service enabled (dgx-optimize.service)"
+          - ""
+          - "Optimizations will survive reboots!"
+          - ""
+          - "Usage:"
+          - "  This run:              Applied + Made Persistent"
+          - "  Test with reboot:      Add -e 'do_reboot=true'"
+          - "  Check status:          Add -e 'optimization_action=status'"
+          - "  Undo everything:       Add -e 'optimization_action=undo'"
+      when: optimization_action == "apply"
+    
+    - name: Display status summary
+      debug:
+        msg:
+          - "============================================"
+          - "System Optimization Status Check"
+          - "============================================"
+          - "See detailed status above"
+      when: optimization_action == "status"
+    
+    - name: Display undo summary
+      debug:
+        msg:
+          - "============================================"
+          - "Optimizations Reverted"
+          - "============================================"
+          - "System returned to default settings"
+      when: optimization_action == "undo"

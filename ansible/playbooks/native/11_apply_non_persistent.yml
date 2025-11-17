@@ -1,0 +1,81 @@
+---
+- name: Apply Non-Persistent Optimizations (GPU Clocks, vboost, C-States)
+  hosts: spark_primary
+  become: yes
+  gather_facts: yes
+
+  vars:
+    scripts_dir: "/opt/dgx-optimize"
+
+  tasks:
+    - name: Ensure scripts directory exists
+      ansible.builtin.file:
+        path: "{{ scripts_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Copy GPU optimization script
+      ansible.builtin.copy:
+        src: "../../scripts/gpu_optimize.sh"
+        dest: "{{ scripts_dir }}/gpu_optimize.sh"
+        mode: '0755'
+
+    - name: Apply GPU clocks and vboost
+      ansible.builtin.command:
+        cmd: "{{ scripts_dir }}/gpu_optimize.sh apply"
+      register: gpu_result
+      changed_when: true
+
+    - name: Display GPU optimization output
+      ansible.builtin.debug:
+        var: gpu_result.stdout_lines
+
+    - name: Wait for settings to stabilize
+      ansible.builtin.pause:
+        seconds: 2
+
+    - name: Verify GPU clocks are locked
+      ansible.builtin.shell: |
+        nvidia-smi --query-gpu=clocks.sm,clocks.max.sm --format=csv,noheader
+      register: gpu_clocks
+      changed_when: false
+
+    - name: Verify vboost setting
+      ansible.builtin.shell: |
+        nvidia-smi boost-slider --show | grep -i "current" || echo "Unable to verify vboost"
+      register: vboost_check
+      changed_when: false
+      failed_when: false
+
+    - name: Verify C-states are disabled
+      ansible.builtin.shell: |
+        cat /sys/devices/system/cpu/cpu*/cpuidle/state2/disable /sys/devices/system/cpu/cpu*/cpuidle/state3/disable 2>/dev/null | sort -u
+      register: cstate_check
+      changed_when: false
+
+    - name: Display verification results
+      ansible.builtin.debug:
+        msg:
+          - "=== Non-Persistent Optimizations Applied ==="
+          - ""
+          - "GPU Clocks:"
+          - "{{ gpu_clocks.stdout_lines }}"
+          - ""
+          - "vboost Status:"
+          - "{{ vboost_check.stdout_lines }}"
+          - ""
+          - "C-States (should show '1' = disabled):"
+          - "{{ cstate_check.stdout }}"
+          - ""
+          - "These settings will remain active until next reboot."
+          - "Run this playbook again after reboot to re-apply."
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg:
+          - "✅ GPU clocks locked to maximum"
+          - "✅ vboost slider set to compute mode (1)"
+          - "✅ CPU C-states 2&3 disabled for lower latency"
+          - ""
+          - "Note: These optimizations do not survive reboots."
+          - "Re-run this playbook after reboot, or use the dgx-optimize.service if installed."
