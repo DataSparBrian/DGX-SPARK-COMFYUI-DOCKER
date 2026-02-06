@@ -1,0 +1,27 @@
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: ../.env
+        required: false
+    volumes:
+      - ..:/workspace:cached
+      - vscode-extensions:/home/vscode/.vscode-server/extensions
+      - uv-cache:/home/vscode/.cache/uv
+      - cline-config:/home/vscode/.cline
+      - bash-history:/home/vscode/.bash_history_dir
+      - npm-cache:/home/vscode/.npm
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - GOOGLE_CLOUD_REGION=${GOOGLE_CLOUD_REGION:-}
+    command: sleep infinity
+
+volumes:
+  vscode-extensions:
+  uv-cache:
+  cline-config:
+  bash-history:
+  npm-cache:

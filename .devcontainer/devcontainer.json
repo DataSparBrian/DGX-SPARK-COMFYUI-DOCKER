@@ -1,0 +1,60 @@
+{
+    "name": "python-dev",
+    "dockerComposeFile": "docker-compose.yml",
+    "service": "dev",
+    "workspaceFolder": "/workspace",
+
+    "features": {
+        "ghcr.io/devcontainers/features/node:1": {
+            "version": "lts",
+            "nodeGypDependencies": true
+        },
+        "ghcr.io/dhoeric/features/google-cloud-cli:1": {
+            "version": "latest",
+            "install_components": "gke-gcloud-auth-plugin,kubectl"
+        },
+        "ghcr.io/joshuanianji/devcontainer-features/gcloud-cli-persistence:1": {},
+        "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+            "version": "latest",
+            "enableNonRootDocker": "true"
+        },
+        "ghcr.io/dhoeric/features/hadolint:1": {}
+    },
+
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "charliermarsh.ruff",
+                "ms-toolsai.jupyter",
+                "ms-python.python",
+                "ms-python.vscode-pylance",
+                "ms-vscode.makefile-tools",
+                "streetsidesoftware.code-spell-checker",
+                "shardulm94.trailing-spaces",
+                "eamodio.gitlens",
+                "googlecloudtools.cloudcode",
+                "saoudrizwan.claude-dev"
+            ]
+        }
+    },
+
+    "containerEnv": {
+        "UV_PROJECT_ENVIRONMENT": "/home/vscode/.venv",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "GOOGLE_CLOUD_PROJECT": "${localEnv:GOOGLE_CLOUD_PROJECT}",
+        "CLOUDSDK_CORE_PROJECT": "${localEnv:GOOGLE_CLOUD_PROJECT}",
+        "NPM_CONFIG_CACHE": "/home/vscode/.npm"
+    },
+
+    "mounts": [
+        "source=${localEnv:HOME}${localEnv:USERPROFILE}/.config/gcloud,target=/home/vscode/.config/gcloud,type=bind,consistency=cached",
+        "source=${localEnv:HOME}${localEnv:USERPROFILE}/.ssh,target=/home/vscode/.ssh,type=bind,consistency=cached"
+    ],
+
+    "overrideCommand": true,
+    "onCreateCommand": "npm install -g cline @google/gemini-cli",
+    "postCreateCommand": "bash -c 'sudo chown -R vscode:vscode /home/vscode/.vscode-server 2>/dev/null || true; if [ -f pyproject.toml ]; then uv sync --frozen || uv sync; fi; find /home/vscode/.ssh -type f -name \"id_*\" ! -name \"*.pub\" -exec chmod 600 {} \\; 2>/dev/null || true'",
+    "postStartCommand": "bash -c 'sudo chown vscode /var/run/docker.sock 2>/dev/null || true'",
+
+    "remoteUser": "vscode"
+}
